@@ -1,0 +1,414 @@
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  userName     String
+  email        String?    @unique
+  password     String
+  phone        String     @unique
+  address      String?
+  profileImage     String?
+  stripeCustomerId String?
+  fcmToken         String?
+  settings         Json?
+  role             UserRole   @default(Client)
+  status           UserStatus @default(Active)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  sentMessages           Message[]               @relation("SentMessages")
+  receivedMessages       Message[]               @relation("ReceivedMessages")
+  notificationRecipient  NotificationRecipient[]
+  subscriptionsList      Subscription[]
+  roomsAsSender          Room[]                  @relation("user1Relation")
+  roomsAsReceiver        Room[]                  @relation("user2Relation")
+  payments               Payment[]
+
+  ownedWorkspaces        Workspace[]             @relation("WorkspaceOwner")
+  memberships            WorkspaceMember[]
+
+  @@index([role, status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+  LINKEDIN
+  X
+}
+
+enum PostStatusEnum {
+  DRAFT
+  CANCELLED
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+model SocialAccount {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId  String   @db.ObjectId
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  platform     SocialPlatform
+  externalAccountId String?
+  connectionStatus String @default("ACTION_REQUIRED")
+  accountName  String
+  accessToken  String
+  refreshToken String?
+  tokenExpiry  DateTime?
+  settings     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([workspaceId, platform, externalAccountId])
+  @@index([workspaceId, platform])
+  @@map("socialAccounts")
+}
+
+model UnifiedMessage {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId  String   @db.ObjectId
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  platform     SocialPlatform
+  externalId   String   @unique
+  senderId     String
+  accountId    String? @db.ObjectId
+  conversationId String? @db.ObjectId
+  direction String @default("incoming")
+  aiSuggestion String?
+  text         String?
+  mediaUrls    String[]
+  kind         String   @default("message") // message, comment
+  timestamp    DateTime
+  status       String   @default("unread") // unread, read
+  aiProcessed  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([workspaceId, timestamp])
+  @@index([workspaceId, kind])
+  @@map("unifiedMessages")
+}
+
+model PostStatus {
+  id          String         @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String         @db.ObjectId
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  jobId       String         @unique
+  accountId   String? @db.ObjectId
+  mediaUrls   String[]
+  platformPostId String?
+  platform    SocialPlatform
+  content     String
+  status      PostStatusEnum @default(PENDING)
+  errorLog    String?
+  scheduledAt DateTime       @default(now())
+  publishedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([workspaceId, status])
+  @@map("postStatuses")
+}
+
+// Update Workspace model to include relations
+model Workspace {
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  slug        String     @unique
+  ownerId     String     @db.ObjectId
+  owner       User       @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  planId      String?     @db.ObjectId
+  plan        Plan?      @relation(fields: [planId], references: [id])
+  settings    Json?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  members     WorkspaceMember[]
+  subscriptions Subscription[]
+  payments    Payment[]
+  socialAccounts SocialAccount[]
+  unifiedMessages UnifiedMessage[]
+  postStatuses PostStatus[]
+  products Product[]
+  orders Order[]
+  aiKnowledgeBase AIKnowledgeBase[]
+
+  @@map("workspaces")
+}
+
+
+model WorkspaceMember {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String    @db.ObjectId
+  userId      String    @db.ObjectId
+  role        String    @default("member") // owner, admin, member
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@unique([workspaceId, userId])
+  @@map("workspaceMembers")
+}
+
+model PendingUser {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userName  String
+  email     String?  @unique
+  phone     String   @unique
+  role      UserRole @default(Client)
+  password  String
+  address   String?
+  otpCode   String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("pendingUsers")
+}
+
+model Otp {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  otpCode   String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("otps")
+}
+
+model Room {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  user1Id   String?   @db.ObjectId
+  user2Id   String?   @db.ObjectId
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user1     User?     @relation("user1Relation", fields: [user1Id], references: [id])
+  user2     User?     @relation("user2Relation", fields: [user2Id], references: [id])
+  message   Message[]
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+  @@index([updatedAt])
+  @@map("rooms")
+}
+
+model Message {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  senderId   String   @db.ObjectId
+  sender     User?    @relation("SentMessages", fields: [senderId], references: [id])
+  receiverId String   @db.ObjectId
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  content    String?
+  fileUrl    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  Room       Room?    @relation(fields: [roomId], references: [id])
+  roomId     String?  @db.ObjectId
+
+  @@index([roomId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
+  @@map("messages")
+}
+
+model Notification {
+  id               String                  @id @default(auto()) @map("_id") @db.ObjectId
+  title            String
+  message          String
+  redirectEndpoint String?
+  users            NotificationRecipient[]
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model NotificationRecipient {
+  id             String        @id @default(auto()) @map("_id") @db.ObjectId
+  isRead         Boolean       @default(false)
+  receivedAt     DateTime      @default(now())
+  notification   Notification? @relation(fields: [notificationId], references: [id])
+  user           User          @relation(fields: [userId], references: [id])
+  notificationId String        @db.ObjectId
+  userId         String        @db.ObjectId
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([notificationId, userId])
+  @@index([userId, isRead])
+  @@index([userId, receivedAt])
+  @@map("notificationRecipient")
+}
+
+model Plan {
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
+  planType    String
+  amount      Int
+  description String
+  priceId     String
+  productId   String
+  feature     String[]
+  active      Boolean      @default(true)
+  currency    String
+  interval    PlanInterval @default(month)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  workspaces Workspace[]
+
+  @@index([active])
+  @@index([planType])
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String              @id @default(auto()) @map("_id") @db.ObjectId
+  paymentMethodId    String
+  workspaceId        String              @db.ObjectId
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id])
+  userId             String?             @db.ObjectId
+  user               User?               @relation(fields: [userId], references: [id])
+  priceId            String
+  price              Float?
+  subscriptionId     String
+  planType           String
+  interval           String
+  status             SubscriptionStatus  @default(ACTIVE)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([subscriptionId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                    String        @id @default(auto()) @map("_id") @db.ObjectId
+  amount                Float
+  currency              String        @default("bdt")
+  status                PaymentStatus @default(Pending)
+  stripePaymentIntentId String?
+  stripeChargeId        String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
+
+  workspaceId String @db.ObjectId
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@index([userId, status])
+  @@index([stripePaymentIntentId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  Pending
+  Paid
+  Failed
+  Refunded
+}
+
+enum PlanInterval {
+  month
+  year
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum UserStatus {
+  Active
+  Blocked
+  Deleted
+}
+
+enum UserRole {
+  Admin
+  Client
+}
+model Product {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String   @db.ObjectId
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  name         String
+  sku          String   @unique
+  category     String
+  price        Float
+  stock        Int
+  status       String   @default("In Stock")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@map("products")
+}
+
+model Order {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String   @db.ObjectId
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  customer    String
+  total       Float
+  status       String   @default("Pending")
+  items       Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([workspaceId, status])
+  @@map("orders")
+}
+
+model AIKnowledgeBase {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String   @db.ObjectId
+  workspace    Workspace @relation(fields: [workspaceId], references: [id])
+  question     String
+  answer       String
+  category     String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([workspaceId, category])
+  @@map("aiKnowledgeBase")
+}
+
+model Conversation {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  accountId String @db.ObjectId
+  senderId String
+  platform SocialPlatform
+  aiEnabled Boolean @default(true)
+  humanTakeover Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([accountId, senderId])
+  @@index([workspaceId])
+  @@map("conversations")
+}

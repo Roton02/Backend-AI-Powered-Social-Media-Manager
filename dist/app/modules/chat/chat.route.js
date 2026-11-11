@@ -1,0 +1,20 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.chatRoutes = void 0;
+const express_1 = __importDefault(require("express"));
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const client_1 = require("@prisma/client");
+const chat_controller_1 = require("./chat.controller");
+const fileUploadHelper_1 = require("../../../helpers/fileUploadHelper");
+const parseBodyData_1 = require("../../middlewares/parseBodyData");
+const router = express_1.default.Router();
+router.get("/rooms", (0, auth_1.default)(), chat_controller_1.chatController.getAllRooms);
+router.get("/directory", (0, auth_1.default)(client_1.UserRole.Admin), chat_controller_1.chatController.getDirectory);
+router.post("/rooms", (0, auth_1.default)(), chat_controller_1.chatController.openRoom);
+router.get("/rooms/:roomId", (0, auth_1.default)(), chat_controller_1.chatController.getRoomById);
+router.get("/rooms/:roomId/messages", (0, auth_1.default)(), chat_controller_1.chatController.getRoomMessages);
+router.post("/rooms/:roomId/messages", (0, auth_1.default)(), fileUploadHelper_1.fileUploader.uploadFile, parseBodyData_1.parseBodyData, chat_controller_1.chatController.sendMessage);
+exports.chatRoutes = router;
