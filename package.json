@@ -11,7 +11,7 @@
     "test:browser": "node tests/browser/smoke.cjs",
     "test:db": "RUN_DB_TESTS=1 jest --runInBand tests/database",
     "test:db:browser": "RUN_DB_TESTS=1 RUN_DB_BROWSER=1 jest --runInBand tests/database",
-    "test:scheduler": "jest --runInBand pipeline.test.ts ai-paused.test.ts upload-direct.test.ts linkedin.test.ts youtube.test.ts x-tiktok.test.ts social-security.test.ts",
+    "test:scheduler": "jest --runInBand pipeline.test.ts ai-paused.test.ts upload-direct.test.ts linkedin.test.ts youtube.test.ts x-tiktok.test.ts social-security.test.ts inbox-manual.test.ts inbox-ai.test.ts token-keepalive.test.ts inbox-cache.test.ts",
     "test:scheduler:db": "RUN_DB_TESTS=1 RUN_DB_BROWSER=1 SCHEDULER_ONLY=1 jest --runInBand tests/database"
   },
   "keywords": [],

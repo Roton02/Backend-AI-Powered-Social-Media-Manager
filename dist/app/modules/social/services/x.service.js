@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.X_TEXT_LIMIT = exports.xCallback = exports.xScopes = void 0;
+exports.refreshX = exports.X_TEXT_LIMIT = exports.xCallback = exports.xScopes = void 0;
 exports.pkcePair = pkcePair;
 exports.xAuthUrl = xAuthUrl;
 exports.connectX = connectX;
@@ -72,10 +72,12 @@ function xRequest(account, request) {
     });
 }
 /** Posts text with up to one image and returns the post ID. */
+const refreshX = (refreshToken) => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
+exports.refreshX = refreshX;
 function publishX(account, content, imageUrl) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
-        const token = yield (0, refreshable_token_service_1.freshAccessToken)(account, 'X', refreshToken => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }));
+        const token = yield (0, refreshable_token_service_1.freshAccessToken)(account, 'X', exports.refreshX);
         const headers = { Authorization: `Bearer ${token}` };
         let media;
         if (imageUrl) {

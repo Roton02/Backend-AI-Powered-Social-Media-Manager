@@ -42,7 +42,7 @@ function platformError(error: any, fallback: { status: number; code: string; mes
   return apiError;
 }
 
-async function freshAccessToken(account: any) {
+export async function freshAccessToken(account: any) {
   if (!account.refreshToken) throw Object.assign(new ApiError(409, 'Reconnect this YouTube channel.'), { metaError: { status: 401, code: 'no_refresh_token', message: 'YouTube access expired. Reconnect the channel' } });
   try {
     return (await axios.post(tokenUrl, new URLSearchParams({ client_id: config.social.youtube_client_id as string, client_secret: config.social.youtube_client_secret as string, refresh_token: decryptToken(account.refreshToken), grant_type: 'refresh_token' }), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 })).data.access_token as string;

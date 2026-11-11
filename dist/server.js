@@ -18,6 +18,8 @@ const config_1 = __importDefault(require("./config"));
 const prisma_1 = __importDefault(require("./shared/prisma"));
 const radis_1 = __importDefault(require("./helpers/radis"));
 const publishing_worker_1 = require("./workers/publishing.worker");
+const inbox_sync_worker_1 = require("./workers/inbox-sync.worker");
+const token_keepalive_worker_1 = require("./workers/token-keepalive.worker");
 const socket_controller_1 = require("./app/modules/socket/socket.controller");
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -28,7 +30,10 @@ function main() {
         });
         (0, socket_controller_1.setupWebSocketServer)(server);
         (0, publishing_worker_1.startPublishingWorker)();
-        // Only the publishing worker runs during scheduler testing. Other feature workers are paused.
+        // Manual inbox sync (owner-approved 2026-11-11). The AI inbox worker stays paused.
+        (0, inbox_sync_worker_1.startInboxSyncWorker)();
+        // Keeps social connections alive and flags dead ones before a post fails.
+        (0, token_keepalive_worker_1.startTokenKeepAliveWorker)();
         const exitHandler = () => {
             if (server) {
                 server.close(() => {

@@ -12,8 +12,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.inboxService = exports.InboxService = void 0;
+exports.inboxService = exports.InboxService = exports.REPLY_WINDOW_MS = void 0;
 exports.conversationLock = conversationLock;
+exports.recordDirectMessage = recordDirectMessage;
 const features_1 = require("../../../../config/features");
 const crypto_1 = require("crypto");
 const prisma_1 = __importDefault(require("../../../../shared/prisma"));
@@ -21,6 +22,7 @@ const ApiErrors_1 = __importDefault(require("../../../../errors/ApiErrors"));
 const queue_service_1 = require("../../../../shared/queue.service");
 const socket_service_1 = require("../../../../shared/socket.service");
 const meta_service_1 = require("./meta.service");
+const inbox_cache_service_1 = require("./inbox-cache.service");
 function conversationLock(id, fn) {
     return __awaiter(this, void 0, void 0, function* () {
         const value = (0, crypto_1.randomUUID)(), key = `conversation-lock:${id}`;
@@ -32,6 +34,49 @@ function conversationLock(id, fn) {
         finally {
             yield queue_service_1.redisConnection.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end", 1, key, value);
         }
+    });
+}
+exports.REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+/**
+ * Saves one DM (incoming, or sent by the business from another app) into the right conversation.
+ * Idempotent: a message already stored, or a reply we sent ourselves, is skipped. Returns the new row or null.
+ */
+function recordDirectMessage(account_1, dm_1) {
+    return __awaiter(this, arguments, void 0, function* (account, dm, markRead = false) {
+        const externalId = `${account.id}:message:${dm.mid}`;
+        if (yield prisma_1.default.unifiedMessage.findUnique({ where: { externalId } }))
+            return null;
+        if (dm.fromBusiness && (yield prisma_1.default.unifiedMessage.findFirst({ where: { accountId: account.id, platformMessageId: dm.mid } })))
+            return null;
+        const key = { accountId_senderId: { accountId: account.id, senderId: dm.customerId } };
+        let conversation = yield prisma_1.default.conversation.findUnique({ where: key });
+        if (!conversation) {
+            try {
+                conversation = yield prisma_1.default.conversation.create({ data: { workspaceId: account.workspaceId, accountId: account.id, senderId: dm.customerId, platform: account.platform, aiEnabled: false } });
+            }
+            catch (e) {
+                if (e.code !== 'P2002')
+                    throw e;
+                conversation = yield prisma_1.default.conversation.findUniqueOrThrow({ where: key });
+            }
+        }
+        let message;
+        try {
+            message = yield prisma_1.default.unifiedMessage.create({ data: {
+                    workspaceId: account.workspaceId, accountId: account.id, conversationId: conversation.id, platform: account.platform, externalId,
+                    senderId: dm.customerId, text: dm.text, mediaUrls: dm.attachments.map(a => a.url), attachments: dm.attachments, kind: 'message', timestamp: dm.timestamp,
+                    direction: dm.fromBusiness ? 'outgoing' : 'incoming', status: dm.fromBusiness ? 'sent' : markRead ? 'read' : 'unread', aiProcessed: true,
+                } });
+        }
+        catch (e) {
+            if (e.code === 'P2002')
+                return null;
+            throw e;
+        }
+        const later = (a) => !a || a < dm.timestamp;
+        yield prisma_1.default.conversation.update({ where: { id: conversation.id }, data: Object.assign(Object.assign(Object.assign({}, (dm.customerName ? { customerName: dm.customerName } : {})), (later(conversation.lastMessageAt) ? { lastMessageAt: dm.timestamp, lastMessageText: (0, inbox_cache_service_1.previewText)(dm.text, dm.attachments), lastMessageDirection: dm.fromBusiness ? 'outgoing' : 'incoming' } : {})), (!dm.fromBusiness && later(conversation.lastIncomingAt) ? { lastIncomingAt: dm.timestamp } : {})) });
+        yield (0, inbox_cache_service_1.conversationChanged)(account.workspaceId, conversation.id);
+        return message;
     });
 }
 class InboxService {
@@ -81,6 +126,10 @@ class InboxService {
                                 message = yield prisma_1.default.unifiedMessage.findUniqueOrThrow({ where: { externalId } });
                             }
                         }
+                        if (event.kind === 'message' && message.conversationId) {
+                            yield prisma_1.default.conversation.updateMany({ where: { id: message.conversationId, workspaceId: account.workspaceId }, data: { lastMessageAt: message.timestamp, lastIncomingAt: message.timestamp, lastMessageText: (0, inbox_cache_service_1.previewText)(message.text || '', (message.mediaUrls || []).map((url) => ({ type: 'file', url }))) } });
+                            yield (0, inbox_cache_service_1.conversationChanged)(account.workspaceId, message.conversationId);
+                        }
                         if (features_1.featureFlags.aiAutomation && event.kind === 'message' && !message.aiProcessed)
                             yield queue_service_1.queueService.addJob('inbox-sync-queue', 'process-new-message', { messageId: message.id, workspaceId: account.workspaceId }, { jobId: message.id, attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true, removeOnFail: true });
                         socket_service_1.socketService.emitToWorkspace(account.workspaceId, 'new-message', { message });
@@ -106,18 +155,47 @@ class InboxService {
             const message = yield prisma_1.default.unifiedMessage.findFirst({ where: { id, workspaceId } });
             if (!message)
                 throw new ApiErrors_1.default(404, 'Message not found.');
-            return prisma_1.default.unifiedMessage.updateMany({ where: Object.assign({ workspaceId, direction: 'incoming', status: 'unread' }, (message.conversationId ? { conversationId: message.conversationId } : { id })), data: { status: 'read' } });
+            const result = yield prisma_1.default.unifiedMessage.updateMany({ where: Object.assign({ workspaceId, direction: 'incoming', status: 'unread' }, (message.conversationId ? { conversationId: message.conversationId } : { id })), data: { status: 'read' } });
+            if (message.conversationId && result.count)
+                yield (0, inbox_cache_service_1.conversationChanged)(workspaceId, message.conversationId);
+            return result;
+        });
+    }
+    /** Marks every unread customer message in a conversation as read. */
+    markConversationRead(workspaceId, conversationId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const result = yield prisma_1.default.unifiedMessage.updateMany({ where: { workspaceId, conversationId, direction: 'incoming', status: 'unread' }, data: { status: 'read' } });
+            if (result.count)
+                yield (0, inbox_cache_service_1.conversationChanged)(workspaceId, conversationId);
+            return { updated: result.count };
+        });
+    }
+    /** Replies in a conversation (answers its latest customer message). */
+    replyInConversation(workspaceId, conversationId, text, requestId, attachment) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const latest = yield prisma_1.default.unifiedMessage.findFirst({ where: { workspaceId, conversationId, direction: 'incoming', kind: 'message' }, orderBy: { timestamp: 'desc' } });
+            if (!latest)
+                throw new ApiErrors_1.default(404, 'Conversation not found.');
+            return this.sendReply(workspaceId, latest.id, text, requestId, false, attachment);
         });
     }
     sendReply(workspaceId_1, messageId_1, text_1, requestId_1) {
-        return __awaiter(this, arguments, void 0, function* (workspaceId, messageId, text, requestId, automatic = false) {
+        return __awaiter(this, arguments, void 0, function* (workspaceId, messageId, text, requestId, automatic = false, attachment) {
             if (automatic && !features_1.featureFlags.aiAutomation)
                 return { suppressed: true };
             const message = yield prisma_1.default.unifiedMessage.findFirst({ where: { id: messageId, workspaceId, direction: 'incoming' } });
             if (!(message === null || message === void 0 ? void 0 : message.accountId) || !message.conversationId)
                 throw new ApiErrors_1.default(409, 'This message needs a connected account.');
+            if (message.platform === 'INSTAGRAM' && message.kind === 'message' && text.length > 1000)
+                throw new ApiErrors_1.default(400, 'Instagram messages can be up to 1000 characters.');
+            if (attachment && message.kind !== 'message')
+                throw new ApiErrors_1.default(400, 'Attachments can only be sent in messages.');
+            if (attachment && message.platform === 'INSTAGRAM' && !['image', 'video', 'audio'].includes(attachment.type))
+                throw new ApiErrors_1.default(400, 'Instagram messages accept photos, videos and audio only.');
+            if (!text && !attachment)
+                throw new ApiErrors_1.default(400, 'Write a message or add an attachment.');
             return conversationLock(message.conversationId, () => __awaiter(this, void 0, void 0, function* () {
-                var _a;
+                var _a, _b;
                 const conversation = yield prisma_1.default.conversation.findFirst({ where: { id: message.conversationId, workspaceId } });
                 const workspace = yield prisma_1.default.workspace.findUnique({ where: { id: workspaceId } });
                 if (automatic && (!(conversation === null || conversation === void 0 ? void 0 : conversation.aiEnabled) || conversation.humanTakeover || ((_a = workspace === null || workspace === void 0 ? void 0 : workspace.settings) === null || _a === void 0 ? void 0 : _a.ai_auto_reply) !== true))
@@ -125,26 +203,50 @@ class InboxService {
                 const externalId = `out:${message.accountId}:${requestId}`;
                 const previous = yield prisma_1.default.unifiedMessage.findUnique({ where: { externalId } });
                 if (previous) {
+                    if (previous.status === 'failed')
+                        throw new ApiErrors_1.default(409, 'This reply was rejected. Change the text to try again.');
                     if (previous.status !== 'sent')
                         throw new ApiErrors_1.default(409, 'The previous reply result is uncertain. Check the platform before sending again.');
                     return previous;
                 }
+                if (message.kind === 'message') {
+                    // Meta only accepts replies within 24 hours of the customer's last message.
+                    const last = yield prisma_1.default.unifiedMessage.findFirst({ where: { workspaceId, conversationId: message.conversationId, direction: 'incoming', kind: 'message' }, orderBy: { timestamp: 'desc' } });
+                    if ((last === null || last === void 0 ? void 0 : last.timestamp) && Date.now() - new Date(last.timestamp).getTime() > exports.REPLY_WINDOW_MS)
+                        throw new ApiErrors_1.default(409, "The customer's last message is more than 24 hours old, so Meta does not allow a reply from here. Reply in the Facebook or Instagram app instead.");
+                }
                 const account = yield (0, meta_service_1.connectedAccount)(workspaceId, message.accountId, message.kind === 'comment' ? 'comments' : 'messaging');
-                const outgoing = yield prisma_1.default.unifiedMessage.create({ data: { workspaceId, accountId: account.id, conversationId: message.conversationId, platform: message.platform, externalId, senderId: message.senderId, text, kind: message.kind, mediaUrls: [], timestamp: new Date(), direction: automatic ? 'ai' : 'outgoing', status: 'sending', aiProcessed: true } });
+                const outgoing = yield prisma_1.default.unifiedMessage.create({ data: { workspaceId, accountId: account.id, conversationId: message.conversationId, platform: message.platform, externalId, senderId: message.senderId, text, kind: message.kind, mediaUrls: attachment ? [attachment.url] : [], attachments: attachment ? [attachment] : undefined, timestamp: new Date(), direction: automatic ? 'ai' : 'outgoing', status: 'sending', aiProcessed: true } });
+                const changed = () => (0, inbox_cache_service_1.conversationChanged)(workspaceId, message.conversationId);
+                yield changed();
                 // Reserving before the API request prevents duplicate sends after a timeout/crash.
                 try {
                     const sourceId = message.externalId.split(':').slice(2).join(':');
-                    const path = message.kind === 'comment' ? `${sourceId}/${message.platform === 'INSTAGRAM' ? 'replies' : 'comments'}` : `${account.externalAccountId}/messages`;
-                    const payload = message.kind === 'comment' ? { message: text } : Object.assign({ recipient: { id: message.senderId }, message: { text } }, (message.platform === 'FACEBOOK' ? { messaging_type: 'RESPONSE' } : {}));
+                    // Instagram DMs connected through Facebook Login are sent from the linked Page.
+                    const pageId = message.platform === 'INSTAGRAM' ? ((_b = account.settings) === null || _b === void 0 ? void 0 : _b.pageId) || account.externalAccountId : account.externalAccountId;
+                    const path = message.kind === 'comment' ? `${sourceId}/${message.platform === 'INSTAGRAM' ? 'replies' : 'comments'}` : `${pageId}/messages`;
+                    // Meta sends text and an attachment as separate messages, so a request carries one or the other.
+                    const content = attachment ? { attachment: { type: attachment.type, payload: { url: attachment.url, is_reusable: false } } } : { text };
+                    const payload = message.kind === 'comment' ? { message: text } : Object.assign({ recipient: { id: message.senderId }, message: content }, (message.platform === 'FACEBOOK' ? { messaging_type: 'RESPONSE' } : {}));
                     const response = yield (0, meta_service_1.metaRequest)(account, path, payload);
                     if (!response.id && !response.message_id)
                         throw new Error('No message ID');
-                    const result = yield prisma_1.default.unifiedMessage.update({ where: { id: outgoing.id }, data: { status: 'sent' } });
-                    socket_service_1.socketService.emitToWorkspace(workspaceId, 'new-message', { message: result });
+                    const result = yield prisma_1.default.unifiedMessage.update({ where: { id: outgoing.id }, data: { status: 'sent', platformMessageId: String(response.message_id || response.id) } });
+                    yield prisma_1.default.conversation.updateMany({ where: { id: message.conversationId, workspaceId }, data: { lastMessageAt: new Date(), lastMessageText: (0, inbox_cache_service_1.previewText)(text, attachment ? [attachment] : []), lastMessageDirection: 'outgoing' } });
+                    yield changed();
                     return result;
                 }
-                catch (_b) {
+                catch (error) {
+                    // A 4xx from Meta is a definite rejection (nothing was delivered); anything else may have been delivered.
+                    const meta = error === null || error === void 0 ? void 0 : error.metaError;
+                    if ((meta === null || meta === void 0 ? void 0 : meta.status) >= 400 && meta.status < 500) {
+                        yield prisma_1.default.unifiedMessage.update({ where: { id: outgoing.id }, data: { status: 'failed' } });
+                        yield changed();
+                        const window = meta.subcode === 2018278 || meta.subcode === 2534022;
+                        throw new ApiErrors_1.default(422, window ? 'Meta no longer allows a reply to this customer from here (outside the 24-hour window). Reply in the Facebook or Instagram app instead.' : `Meta rejected this reply${meta.message ? `: ${meta.message}` : ''}. Nothing was sent.`);
+                    }
                     yield prisma_1.default.unifiedMessage.update({ where: { id: outgoing.id }, data: { status: 'uncertain' } });
+                    yield changed();
                     throw new ApiErrors_1.default(502, 'Could not confirm delivery. Check the platform before sending again.');
                 }
             }));

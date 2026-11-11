@@ -86,10 +86,12 @@ model UnifiedMessage {
   senderId     String
   accountId    String? @db.ObjectId
   conversationId String? @db.ObjectId
+  platformMessageId String? // ID the platform gave a reply we sent, so inbox sync does not import it twice
   direction String @default("incoming")
   aiSuggestion String?
   text         String?
   mediaUrls    String[]
+  attachments  Json? // [{type: image|video|audio|file|sticker, url, name?}] for inbox display
   kind         String   @default("message") // message, comment
   timestamp    DateTime
   status       String   @default("unread") // unread, read
@@ -406,6 +408,11 @@ model Conversation {
   platform SocialPlatform
   aiEnabled Boolean @default(true)
   humanTakeover Boolean @default(false)
+  customerName String?
+  lastMessageAt DateTime?
+  lastIncomingAt DateTime?
+  lastMessageText String?
+  lastMessageDirection String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@unique([accountId, senderId])

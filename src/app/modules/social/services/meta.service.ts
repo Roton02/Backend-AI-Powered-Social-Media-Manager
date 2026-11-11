@@ -24,7 +24,10 @@ export function publicAccount(account: any) {
   const { accessToken, refreshToken, settings, ...safe } = account;
   const expired=account.tokenExpiry && new Date(account.tokenExpiry).getTime()<=Date.now();
   const state=expired?'EXPIRED':account.connectionStatus || 'ACTION_REQUIRED';
-  return {...safe, kind:settings?.kind || null, connectionStatus:state, capabilities: ['CONNECTED','LIMITED_ACCESS'].includes(state) ? settings?.capabilities || {} : {publishing:false,messaging:false,comments:false}};
+  // Earliest date the owner must reconnect: a fixed token expiry (LinkedIn) or Meta's 90-day data-access window.
+  const deadlines=[account.tokenExpiry?new Date(account.tokenExpiry).getTime():null,Number(settings?.dataAccessExpiresAt)||null].filter(Boolean) as number[];
+  const reconnectBy=deadlines.length?new Date(Math.min(...deadlines)).toISOString():null;
+  return {...safe, kind:settings?.kind || null, reconnectBy, connectionStatus:state, capabilities: ['CONNECTED','LIMITED_ACCESS'].includes(state) ? settings?.capabilities || {} : {publishing:false,messaging:false,comments:false}};
 }
 export async function connectedAccount(workspaceId:string, accountId:string, capability:string) {
   const account=await prisma.socialAccount.findFirst({where:{id:accountId,workspaceId}});

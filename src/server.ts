@@ -6,6 +6,8 @@ import config from "./config";
 import prisma from "./shared/prisma";
 import redisClient from "./helpers/radis";
 import { startPublishingWorker } from "./workers/publishing.worker";
+import { startInboxSyncWorker } from "./workers/inbox-sync.worker";
+import { startTokenKeepAliveWorker } from "./workers/token-keepalive.worker";
 import { setupWebSocketServer } from "./app/modules/socket/socket.controller";
 
 async function main() {
@@ -18,7 +20,10 @@ async function main() {
 
   setupWebSocketServer(server);
   startPublishingWorker();
-  // Only the publishing worker runs during scheduler testing. Other feature workers are paused.
+  // Manual inbox sync (owner-approved 2026-11-11). The AI inbox worker stays paused.
+  startInboxSyncWorker();
+  // Keeps social connections alive and flags dead ones before a post fails.
+  startTokenKeepAliveWorker();
 
   const exitHandler = () => {
     if (server) {

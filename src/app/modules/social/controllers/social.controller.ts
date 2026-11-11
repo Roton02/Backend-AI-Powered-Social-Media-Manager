@@ -2,6 +2,8 @@ import { z } from "zod";
 import { publicAccount } from "../services/meta.service";
 import { Request, Response } from "express";
 import { inboxService } from "../services/inbox.service";
+import { canSyncInbox, syncInboxes } from "../services/inbox-sync.service";
+import { conversationList, conversationMessages } from "../services/inbox-cache.service";
 import { SocialAdapterFactory } from "../adapters/social-adapter.factory";
 import { SocialPlatform } from "../adapters/social-adapter.interface";
 import catchAsync from "../../../../shared/catchAsync";
@@ -121,10 +123,31 @@ const adminListAccounts = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getConversations=catchAsync(async(req,res)=>{
+ sendResponse(res,{statusCode:200,success:true,message:"Conversations retrieved",data:await conversationList(req.headers['x-workspace-id'] as string)});
+});
+const getConversationMessages=catchAsync(async(req,res)=>{
+ const before=typeof req.query.before==='string'?req.query.before:undefined;
+ sendResponse(res,{statusCode:200,success:true,message:"Messages retrieved",data:await conversationMessages(req.headers['x-workspace-id'] as string,req.params.id,before)});
+});
+const markConversationRead=catchAsync(async(req,res)=>{
+ sendResponse(res,{statusCode:200,success:true,message:"Conversation read",data:await inboxService.markConversationRead(req.headers['x-workspace-id'] as string,req.params.id)});
+});
+// Only files uploaded through our own upload endpoint can be sent.
+const attachmentSchema=z.object({type:z.enum(['image','video','audio','file']),url:z.string().url().refine(u=>u.startsWith('https://res.cloudinary.com/'),'Upload the file first.'),name:z.string().max(200).optional()});
+const replyInConversation=catchAsync(async(req,res)=>{
+ const data=z.object({text:z.string().trim().max(2000).default(''),attachment:attachmentSchema.optional(),requestId:z.string().uuid()}).refine(d=>Boolean(d.text)!==Boolean(d.attachment),'Send either text or one attachment.').parse(req.body);
+ const result=await inboxService.replyInConversation(req.headers['x-workspace-id'] as string,req.params.id,data.text,data.requestId,data.attachment);
+ sendResponse(res,{statusCode:200,success:true,message:"Reply sent",data:result});
+});
+// Which accounts feed the inbox, and why one is not updating. Never returns tokens.
+const getInboxAccounts=catchAsync(async(req,res)=>{
  const workspaceId=req.headers['x-workspace-id'] as string;
- const conversations=await prisma.conversation.findMany({where:{workspaceId},orderBy:{updatedAt:'desc'},take:100});
- const rows=await Promise.all(conversations.map(async c=>({...c,messages:await prisma.unifiedMessage.findMany({where:{workspaceId,conversationId:c.id,kind:'message'},orderBy:{timestamp:'desc'},take:200}).then(messages=>messages.reverse())})));
- sendResponse(res,{statusCode:200,success:true,message:"Conversations retrieved",data:rows.filter(c=>c.messages.length)});
+ const accounts=await prisma.socialAccount.findMany({where:{workspaceId,platform:{in:['FACEBOOK','INSTAGRAM']}},orderBy:{createdAt:'asc'}});
+ sendResponse(res,{statusCode:200,success:true,message:"Inbox accounts",data:accounts.map(a=>{const s=(a.settings||{}) as any;return {id:a.id,platform:a.platform,accountName:a.accountName,messaging:canSyncInbox(a),syncedAt:s.inboxSyncedAt||null,error:canSyncInbox(a)?s.inboxError||null:null};})});
+});
+const syncInbox=catchAsync(async(req,res)=>{
+ const saved=await syncInboxes(req.headers['x-workspace-id'] as string);
+ sendResponse(res,{statusCode:200,success:true,message:"Inbox synced",data:{saved}});
 });
 const setTakeover=catchAsync(async(req,res)=>{
  const {enabled}=z.object({enabled:z.boolean()}).parse(req.body);
@@ -133,6 +156,11 @@ const setTakeover=catchAsync(async(req,res)=>{
 });
 export const socialController = {
   getConversations,
+  getConversationMessages,
+  markConversationRead,
+  replyInConversation,
+  getInboxAccounts,
+  syncInbox,
   setTakeover,
   getInboxMessages,
   markMessageAsRead,

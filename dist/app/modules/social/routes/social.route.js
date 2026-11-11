@@ -20,8 +20,13 @@ router.get("/selection", (0, auth_1.default)(), tenantGuard_1.default, oauth_con
 router.post("/selection", (0, auth_1.default)(), tenantGuard_1.default, oauth_controller_1.oauthController.confirmSelection);
 router.get("/conversations", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.getConversations);
 router.patch("/conversations/:id/takeover", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.setTakeover);
+router.get("/conversations/:id/messages", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.getConversationMessages);
+router.patch("/conversations/:id/read", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.markConversationRead);
+router.post("/conversations/:id/reply", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.replyInConversation);
 // Unified inbox
 router.get("/inbox", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.getInboxMessages);
+router.get("/inbox/accounts", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.getInboxAccounts);
+router.post("/inbox/sync", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.syncInbox);
 router.patch("/inbox/:id/read", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.markMessageAsRead);
 router.post("/inbox/:id/reply", (0, auth_1.default)(), tenantGuard_1.default, social_controller_1.socialController.replyToMessage);
 // Unified comments

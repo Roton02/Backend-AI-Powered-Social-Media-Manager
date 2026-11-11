@@ -8,7 +8,8 @@ const server=spawn(process.execPath,[path.join(frontend,'node_modules/next/dist/
 const user={id:'012345678901234567890123',userName:'Test Owner',role:'Client',email:'test@example.com',phone:'01234567890'};
 const workspace={id:'012345678901234567890124',name:'Test Shop',slug:'test-shop',ownerId:user.id,settings:{ai_auto_reply:false}};
 const account={id:'012345678901234567890125',platform:'FACEBOOK',accountName:'Test Page',connectionStatus:'CONNECTED',capabilities:{publishing:true,messaging:true,comments:true}};
-const conversation={id:'012345678901234567890126',senderId:'test-customer',platform:'FACEBOOK',aiEnabled:true,humanTakeover:false,messages:[{id:'012345678901234567890127',text:'When are you open?',direction:'incoming',status:'unread',timestamp:new Date().toISOString()}]};
+const conversation={id:'012345678901234567890126',platform:'FACEBOOK',customerName:'Test Customer',accountName:'Test Page',lastMessageAt:new Date().toISOString(),lastIncomingAt:new Date().toISOString(),lastMessageText:'When are you open?',lastMessageDirection:'incoming',unread:1};
+const threadMessages=[{id:'012345678901234567890127',text:'When are you open?',direction:'incoming',status:'unread',timestamp:new Date(Date.now()-3000).toISOString(),attachments:[]},{id:'012345678901234567890128',text:'😍👍',direction:'incoming',status:'unread',timestamp:new Date(Date.now()-2000).toISOString(),attachments:[]},{id:'012345678901234567890129',text:'',direction:'incoming',status:'unread',timestamp:new Date(Date.now()-1000).toISOString(),attachments:[{type:'sticker',url:'data:image/gif;base64,R0lGODlhAQABAAAAACw='}]}];
 let created=false;const calls=[];let browser;
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
@@ -35,6 +36,11 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   else if(route==='/publishing'&&method==='GET')result=[];
   else if(route==='/publishing')result={jobId:'test-job',status:body.draft?'DRAFT':'PENDING'};
   else if(route==='/social/conversations')result=[conversation];
+  else if(route.endsWith('/messages'))result={messages:threadMessages,hasMore:false};
+  else if(route.endsWith('/read')){conversation.unread=0;result={updated:1};}
+  else if(route.endsWith('/reply')){result={id:'out'+threadMessages.length,text:body.text||'',direction:'outgoing',status:'sent',timestamp:new Date().toISOString(),attachments:[]};threadMessages.push(result);}
+  else if(route==='/social/inbox/accounts')result=[{id:'acc',platform:'FACEBOOK',accountName:'Test Page',messaging:true,syncedAt:Date.now(),error:null}];
+  else if(route==='/social/inbox/sync')result={saved:0};
   else if(route.endsWith('/takeover')){conversation.humanTakeover=body.enabled;conversation.aiEnabled=!body.enabled;result=conversation;}
   else if(route==='/ai/knowledge-base')result=[];
   else if(route==='/social/comments')result=[];
@@ -57,8 +63,8 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
  await page.goto('http://localhost:3095/create-post');await page.waitForSelector('input[type=checkbox][value="'+account.id+'"]');await page.click('input[type=checkbox][value="'+account.id+'"]');await page.type('textarea','Browser test draft');await click('Save draft');await page.waitForFunction(()=>document.querySelector('textarea')?.value==='');
  const draft=calls.find(c=>c.route==='/publishing'&&c.method==='POST');assert.equal(draft.body.draft,true);assert.equal(draft.body.accountId,account.id);assert.equal(draft.headers['x-workspace-id'],workspace.id);
  console.log('Check inbox');
- await page.goto('http://localhost:3095/inbox');await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent.includes('test-customer')));await page.evaluate(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.includes('test-customer')).click());await click('Take over');await page.waitForFunction(()=>document.body.textContent.includes('Human takeover'));
- await page.type('textarea','A person is helping you.');await click('Send reply');await page.waitForFunction(()=>document.querySelector('textarea')?.value==='');assert(calls.some(c=>c.route.endsWith('/reply')&&c.body.requestId&&c.body.text==='A person is helping you.'));
+ await page.goto('http://localhost:3095/inbox');await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent.includes('Test Customer')));await page.evaluate(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Test Customer')).click());await page.waitForFunction(()=>document.body.textContent.includes('When are you open?')&&document.querySelector('img[alt="Sticker"]')&&[...document.querySelectorAll('p')].some(p=>p.textContent==='😍👍'&&p.className.includes('text-4xl')));
+ await page.type('textarea','A person is helping you.');await page.click('button[aria-label="Send reply"]');await page.waitForFunction(()=>document.querySelector('textarea')?.value==='');await page.waitForFunction(()=>document.body.textContent.includes('A person is helping you.'));assert(calls.some(c=>c.route.endsWith('/reply')&&c.body.requestId&&c.body.text==='A person is helping you.'));assert(calls.some(c=>c.route.endsWith('/read')));
  await page.setViewport({width:390,height:844});await page.goto('http://localhost:3095/accounts');await page.waitForFunction(()=>document.body.textContent.includes('Test Page'));const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth);assert.equal(overflow,false);
- assert.deepEqual(errors,[]);console.log('PASS_MOCKED: browser signup/verification, login, workspace onboarding, draft/account headers, takeover, manual reply, mobile accounts; no browser exceptions.');
+ assert.deepEqual(errors,[]);console.log('PASS_MOCKED: browser signup/verification, login, workspace onboarding, draft/account headers, manual inbox reply with emoji/sticker display, mobile accounts; no browser exceptions.');
 })().catch(async e=>{console.error(e.stack);console.error('API routes:',calls.map(c=>c.route+' '+c.method));if(browser){const pages=await browser.pages();console.error(await pages.at(-1).evaluate(()=>document.body.innerText));}process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();server.kill();setTimeout(()=>process.exit(process.exitCode||0),1000).unref();});

@@ -58,7 +58,10 @@ function publicAccount(account) {
     const { accessToken, refreshToken, settings } = account, safe = __rest(account, ["accessToken", "refreshToken", "settings"]);
     const expired = account.tokenExpiry && new Date(account.tokenExpiry).getTime() <= Date.now();
     const state = expired ? 'EXPIRED' : account.connectionStatus || 'ACTION_REQUIRED';
-    return Object.assign(Object.assign({}, safe), { kind: (settings === null || settings === void 0 ? void 0 : settings.kind) || null, connectionStatus: state, capabilities: ['CONNECTED', 'LIMITED_ACCESS'].includes(state) ? (settings === null || settings === void 0 ? void 0 : settings.capabilities) || {} : { publishing: false, messaging: false, comments: false } });
+    // Earliest date the owner must reconnect: a fixed token expiry (LinkedIn) or Meta's 90-day data-access window.
+    const deadlines = [account.tokenExpiry ? new Date(account.tokenExpiry).getTime() : null, Number(settings === null || settings === void 0 ? void 0 : settings.dataAccessExpiresAt) || null].filter(Boolean);
+    const reconnectBy = deadlines.length ? new Date(Math.min(...deadlines)).toISOString() : null;
+    return Object.assign(Object.assign({}, safe), { kind: (settings === null || settings === void 0 ? void 0 : settings.kind) || null, reconnectBy, connectionStatus: state, capabilities: ['CONNECTED', 'LIMITED_ACCESS'].includes(state) ? (settings === null || settings === void 0 ? void 0 : settings.capabilities) || {} : { publishing: false, messaging: false, comments: false } });
 }
 function connectedAccount(workspaceId, accountId, capability) {
     return __awaiter(this, void 0, void 0, function* () {

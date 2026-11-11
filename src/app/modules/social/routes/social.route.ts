@@ -20,9 +20,14 @@ router.post("/selection", auth(), tenantGuard, oauthController.confirmSelection)
 
 router.get("/conversations", auth(), tenantGuard, socialController.getConversations);
 router.patch("/conversations/:id/takeover", auth(), tenantGuard, socialController.setTakeover);
+router.get("/conversations/:id/messages", auth(), tenantGuard, socialController.getConversationMessages);
+router.patch("/conversations/:id/read", auth(), tenantGuard, socialController.markConversationRead);
+router.post("/conversations/:id/reply", auth(), tenantGuard, socialController.replyInConversation);
 
 // Unified inbox
 router.get("/inbox", auth(), tenantGuard, socialController.getInboxMessages);
+router.get("/inbox/accounts", auth(), tenantGuard, socialController.getInboxAccounts);
+router.post("/inbox/sync", auth(), tenantGuard, socialController.syncInbox);
 router.patch("/inbox/:id/read", auth(), tenantGuard, socialController.markMessageAsRead);
 router.post("/inbox/:id/reply", auth(), tenantGuard, socialController.replyToMessage);
 

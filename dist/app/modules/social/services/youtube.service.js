@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.isVideoUrl = exports.youtubeCallback = exports.youtubeScopes = void 0;
 exports.youtubeAuthUrl = youtubeAuthUrl;
 exports.connectYoutube = connectYoutube;
+exports.freshAccessToken = freshAccessToken;
 exports.videoDetails = videoDetails;
 exports.publishYoutube = publishYoutube;
 const axios_1 = __importDefault(require("axios"));

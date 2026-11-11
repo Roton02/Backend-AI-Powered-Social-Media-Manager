@@ -16,6 +16,8 @@ exports.socialController = void 0;
 const zod_1 = require("zod");
 const meta_service_1 = require("../services/meta.service");
 const inbox_service_1 = require("../services/inbox.service");
+const inbox_sync_service_1 = require("../services/inbox-sync.service");
+const inbox_cache_service_1 = require("../services/inbox-cache.service");
 const catchAsync_1 = __importDefault(require("../../../../shared/catchAsync"));
 const sendResponse_1 = __importDefault(require("../../../../shared/sendResponse"));
 const http_status_1 = __importDefault(require("http-status"));
@@ -111,10 +113,31 @@ const adminListAccounts = (0, catchAsync_1.default)((req, res) => __awaiter(void
     });
 }));
 const getConversations = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    (0, sendResponse_1.default)(res, { statusCode: 200, success: true, message: "Conversations retrieved", data: yield (0, inbox_cache_service_1.conversationList)(req.headers['x-workspace-id']) });
+}));
+const getConversationMessages = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+    (0, sendResponse_1.default)(res, { statusCode: 200, success: true, message: "Messages retrieved", data: yield (0, inbox_cache_service_1.conversationMessages)(req.headers['x-workspace-id'], req.params.id, before) });
+}));
+const markConversationRead = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    (0, sendResponse_1.default)(res, { statusCode: 200, success: true, message: "Conversation read", data: yield inbox_service_1.inboxService.markConversationRead(req.headers['x-workspace-id'], req.params.id) });
+}));
+// Only files uploaded through our own upload endpoint can be sent.
+const attachmentSchema = zod_1.z.object({ type: zod_1.z.enum(['image', 'video', 'audio', 'file']), url: zod_1.z.string().url().refine(u => u.startsWith('https://res.cloudinary.com/'), 'Upload the file first.'), name: zod_1.z.string().max(200).optional() });
+const replyInConversation = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const data = zod_1.z.object({ text: zod_1.z.string().trim().max(2000).default(''), attachment: attachmentSchema.optional(), requestId: zod_1.z.string().uuid() }).refine(d => Boolean(d.text) !== Boolean(d.attachment), 'Send either text or one attachment.').parse(req.body);
+    const result = yield inbox_service_1.inboxService.replyInConversation(req.headers['x-workspace-id'], req.params.id, data.text, data.requestId, data.attachment);
+    (0, sendResponse_1.default)(res, { statusCode: 200, success: true, message: "Reply sent", data: result });
+}));
+// Which accounts feed the inbox, and why one is not updating. Never returns tokens.
+const getInboxAccounts = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const workspaceId = req.headers['x-workspace-id'];
-    const conversations = yield prisma_1.default.conversation.findMany({ where: { workspaceId }, orderBy: { updatedAt: 'desc' }, take: 100 });
-    const rows = yield Promise.all(conversations.map((c) => __awaiter(void 0, void 0, void 0, function* () { return (Object.assign(Object.assign({}, c), { messages: yield prisma_1.default.unifiedMessage.findMany({ where: { workspaceId, conversationId: c.id, kind: 'message' }, orderBy: { timestamp: 'desc' }, take: 200 }).then(messages => messages.reverse()) })); })));
-    (0, sendResponse_1.default)(res, { statusCode: 200, success: true, message: "Conversations retrieved", data: rows.filter(c => c.messages.length) });
+    const accounts = yield prisma_1.default.socialAccount.findMany({ where: { workspaceId, platform: { in: ['FACEBOOK', 'INSTAGRAM'] } }, orderBy: { createdAt: 'asc' } });
+    (0, sendResponse_1.default)(res, { statusCode: 200, success: true, message: "Inbox accounts", data: accounts.map(a => { const s = (a.settings || {}); return { id: a.id, platform: a.platform, accountName: a.accountName, messaging: (0, inbox_sync_service_1.canSyncInbox)(a), syncedAt: s.inboxSyncedAt || null, error: (0, inbox_sync_service_1.canSyncInbox)(a) ? s.inboxError || null : null }; }) });
+}));
+const syncInbox = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const saved = yield (0, inbox_sync_service_1.syncInboxes)(req.headers['x-workspace-id']);
+    (0, sendResponse_1.default)(res, { statusCode: 200, success: true, message: "Inbox synced", data: { saved } });
 }));
 const setTakeover = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { enabled } = zod_1.z.object({ enabled: zod_1.z.boolean() }).parse(req.body);
@@ -123,6 +146,11 @@ const setTakeover = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, vo
 }));
 exports.socialController = {
     getConversations,
+    getConversationMessages,
+    markConversationRead,
+    replyInConversation,
+    getInboxAccounts,
+    syncInbox,
     setTakeover,
     getInboxMessages,
     markMessageAsRead,

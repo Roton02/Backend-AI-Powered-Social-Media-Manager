@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.oauthController = void 0;
 const crypto_1 = require("crypto");
+const features_1 = require("../../../../../config/features");
 const axios_1 = __importDefault(require("axios"));
 const catchAsync_1 = __importDefault(require("../../../../../shared/catchAsync"));
 const sendResponse_1 = __importDefault(require("../../../../../shared/sendResponse"));
@@ -77,7 +78,9 @@ const getAuthUrl = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, voi
     if (!config_1.default.social.facebook_client_id || !config_1.default.social.facebook_client_secret || !config_1.default.app.backendUrl)
         throw new ApiErrors_1.default(503, 'Social connections are not available yet. Please contact support.');
     (0, meta_service_1.encryptToken)('configuration-check');
-    const scopes = req.params.platform === 'instagram' ? [...publishingScopes, 'instagram_basic', 'instagram_content_publish'] : publishingScopes;
+    // The manual inbox also needs to read and answer Messenger / Instagram DMs.
+    const inboxScopes = features_1.featureFlags.manualInbox ? ['pages_messaging', 'pages_manage_metadata', ...(req.params.platform === 'instagram' ? ['instagram_manage_messages'] : [])] : [];
+    const scopes = [...(req.params.platform === 'instagram' ? [...publishingScopes, 'instagram_basic', 'instagram_content_publish'] : publishingScopes), ...inboxScopes];
     const state = yield startState(req, res, 'facebook');
     send(res, { url: `https://www.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}/dialog/oauth?${new URLSearchParams({ client_id: config_1.default.social.facebook_client_id, redirect_uri: callback(), state, scope: scopes.join(','), response_type: 'code' })}` });
 }));
@@ -190,7 +193,7 @@ const confirmSelection = (0, catchAsync_1.default)((req, res) => __awaiter(void 
         }
         for (const page of session.pages.filter((p) => req.body.pageIds.includes(p.id))) {
             const has = (scope) => session.permissions.includes(scope);
-            // Scheduler connections do not subscribe to messaging/comment webhooks.
+            // Connections do not subscribe to webhooks; the inbox fetches DMs itself (works on localhost).
             for (const platform of ['FACEBOOK', 'INSTAGRAM']) {
                 if (platform === 'INSTAGRAM' && !page.instagram_business_account)
                     continue;
@@ -199,9 +202,11 @@ const confirmSelection = (0, catchAsync_1.default)((req, res) => __awaiter(void 
                 const can = (task) => tasks.includes('MANAGE') || tasks.includes(task);
                 const capabilities = {
                     publishing: platform === 'FACEBOOK' ? has('pages_manage_posts') && has('pages_read_engagement') && can('CREATE_CONTENT') : has('instagram_basic') && has('pages_read_engagement') && has('instagram_content_publish'),
-                    messaging: false, comments: false,
+                    // Messenger needs pages_messaging; Instagram DMs (through the Page) need instagram_manage_messages.
+                    messaging: features_1.featureFlags.manualInbox && can('MESSAGING') && (platform === 'FACEBOOK' ? has('pages_messaging') : has('instagram_manage_messages') && has('instagram_basic')),
+                    comments: false,
                 };
-                const data = { workspaceId: session.workspaceId, platform, externalAccountId, accountName: platform === 'FACEBOOK' ? page.name : page.instagram_business_account.username || page.name, accessToken: (0, meta_service_1.encryptToken)(page.access_token), tokenExpiry: session.expires ? new Date(session.expires) : null, settings: { capabilities, pageId: page.id }, connectionStatus: capabilities.publishing ? 'CONNECTED' : 'LIMITED_ACCESS' };
+                const data = { workspaceId: session.workspaceId, platform, externalAccountId, accountName: platform === 'FACEBOOK' ? page.name : page.instagram_business_account.username || page.name, accessToken: (0, meta_service_1.encryptToken)(page.access_token), tokenExpiry: session.expires ? new Date(session.expires) : null, settings: { capabilities, pageId: page.id }, connectionStatus: capabilities.publishing || capabilities.messaging ? 'CONNECTED' : 'LIMITED_ACCESS' };
                 const existing = yield prisma_1.default.socialAccount.findFirst({ where: { workspaceId: session.workspaceId, platform, externalAccountId } });
                 if (existing)
                     yield prisma_1.default.socialAccount.update({ where: { id: existing.id }, data });

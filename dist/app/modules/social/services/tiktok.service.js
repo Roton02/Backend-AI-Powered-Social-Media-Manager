@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TIKTOK_TEXT_LIMIT = exports.tiktokCallback = exports.tiktokScopes = void 0;
+exports.refreshTiktok = exports.TIKTOK_TEXT_LIMIT = exports.tiktokCallback = exports.tiktokScopes = void 0;
 exports.tiktokPkce = tiktokPkce;
 exports.tiktokAuthUrl = tiktokAuthUrl;
 exports.connectTiktok = connectTiktok;
@@ -90,10 +90,12 @@ function chunkPlan(size) {
     return { chunkSize, count: Math.floor(size / chunkSize) };
 }
 /** Uploads the video as a Direct Post and waits for TikTok to confirm it. Returns the post or publish ID. */
+const refreshTiktok = (refreshToken) => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
+exports.refreshTiktok = refreshTiktok;
 function publishTiktok(account, content, videoUrl) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
-        const token = yield (0, refreshable_token_service_1.freshAccessToken)(account, 'TikTok', refreshToken => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }));
+        const token = yield (0, refreshable_token_service_1.freshAccessToken)(account, 'TikTok', exports.refreshTiktok);
         const info = yield creatorInfo(account, token);
         const options = (info === null || info === void 0 ? void 0 : info.privacy_level_options) || [];
         // Unaudited apps can only post privately; PUBLIC is used only when TikTok offers it.

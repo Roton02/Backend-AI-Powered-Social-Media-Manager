@@ -1,4 +1,5 @@
 import { randomBytes, createHash } from 'crypto';
+import { featureFlags } from '../../../../../config/features';
 import axios from 'axios';
 import catchAsync from '../../../../../shared/catchAsync';
 import sendResponse from '../../../../../shared/sendResponse';
@@ -54,7 +55,9 @@ const getAuthUrl=catchAsync(async(req,res)=>{
   }
   if(!config.social.facebook_client_id || !config.social.facebook_client_secret || !config.app.backendUrl) throw new ApiError(503,'Social connections are not available yet. Please contact support.');
   encryptToken('configuration-check');
-  const scopes=req.params.platform==='instagram' ? [...publishingScopes,'instagram_basic','instagram_content_publish'] : publishingScopes;
+  // The manual inbox also needs to read and answer Messenger / Instagram DMs.
+  const inboxScopes=featureFlags.manualInbox ? ['pages_messaging','pages_manage_metadata',...(req.params.platform==='instagram'?['instagram_manage_messages']:[])] : [];
+  const scopes=[...(req.params.platform==='instagram' ? [...publishingScopes,'instagram_basic','instagram_content_publish'] : publishingScopes),...inboxScopes];
   const state=await startState(req,res,'facebook');
   send(res,{url:`https://www.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}/dialog/oauth?${new URLSearchParams({client_id:config.social.facebook_client_id,redirect_uri:callback(),state,scope:scopes.join(','),response_type:'code'})}`});
 });
@@ -128,7 +131,7 @@ const confirmSelection=catchAsync(async(req,res)=>{
     if(session.provider==='linkedin-pages') { await saveLinkedinPages(session,req.body.pageIds); await redis.del(`selection:${hash(id)}`); return send(res,{connected:true}); }
     for(const page of session.pages.filter((p:any)=>req.body.pageIds.includes(p.id))) {
       const has=(scope:string)=>session.permissions.includes(scope);
-      // Scheduler connections do not subscribe to messaging/comment webhooks.
+      // Connections do not subscribe to webhooks; the inbox fetches DMs itself (works on localhost).
       for(const platform of ['FACEBOOK','INSTAGRAM'] as const) {
         if(platform==='INSTAGRAM' && !page.instagram_business_account) continue;
         const externalAccountId=platform==='FACEBOOK'?page.id:page.instagram_business_account.id;
@@ -136,9 +139,11 @@ const confirmSelection=catchAsync(async(req,res)=>{
         const can=(task:string)=>tasks.includes('MANAGE') || tasks.includes(task);
         const capabilities={
           publishing: platform==='FACEBOOK' ? has('pages_manage_posts')&&has('pages_read_engagement')&&can('CREATE_CONTENT') : has('instagram_basic')&&has('pages_read_engagement')&&has('instagram_content_publish'),
-          messaging:false, comments:false,
+          // Messenger needs pages_messaging; Instagram DMs (through the Page) need instagram_manage_messages.
+          messaging: featureFlags.manualInbox && can('MESSAGING') && (platform==='FACEBOOK' ? has('pages_messaging') : has('instagram_manage_messages')&&has('instagram_basic')),
+          comments:false,
         };
-        const data={workspaceId:session.workspaceId,platform,externalAccountId,accountName:platform==='FACEBOOK'?page.name:page.instagram_business_account.username || page.name,accessToken:encryptToken(page.access_token),tokenExpiry:session.expires?new Date(session.expires):null,settings:{capabilities,pageId:page.id},connectionStatus:capabilities.publishing?'CONNECTED':'LIMITED_ACCESS'};
+        const data={workspaceId:session.workspaceId,platform,externalAccountId,accountName:platform==='FACEBOOK'?page.name:page.instagram_business_account.username || page.name,accessToken:encryptToken(page.access_token),tokenExpiry:session.expires?new Date(session.expires):null,settings:{capabilities,pageId:page.id},connectionStatus:capabilities.publishing||capabilities.messaging?'CONNECTED':'LIMITED_ACCESS'};
         const existing=await prisma.socialAccount.findFirst({where:{workspaceId:session.workspaceId,platform,externalAccountId}});
         if(existing) await prisma.socialAccount.update({where:{id:existing.id},data}); else await prisma.socialAccount.create({data});
       }

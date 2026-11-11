@@ -47,8 +47,10 @@ async function xRequest(account: any, request: any) {
 }
 
 /** Posts text with up to one image and returns the post ID. */
+export const refreshX = (refreshToken: string) => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
+
 export async function publishX(account: any, content: string, imageUrl?: string) {
-  const token = await freshAccessToken(account, 'X', refreshToken => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }));
+  const token = await freshAccessToken(account, 'X', refreshX);
   const headers = { Authorization: `Bearer ${token}` };
   let media: any;
   if (imageUrl) {

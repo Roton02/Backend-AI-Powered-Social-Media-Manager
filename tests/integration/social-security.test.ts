@@ -30,7 +30,7 @@ test('OAuth requires matching browser state and rejects replay',async()=>{
 test('configured authorization has random state, expiry and HttpOnly browser binding',async()=>{
  config.app.backendUrl='http://localhost:5000';config.social.facebook_client_id='test-id';config.social.facebook_client_secret='test-secret';
  const response=await request(app).get('/auth/facebook').set('x-workspace-id','workspace');expect(response.status).toBe(200);
- expect(new URL(response.body.result.url).searchParams.get('scope')?.split(',')).toEqual(['pages_show_list','pages_read_engagement','pages_manage_posts','business_management']);
+ expect(new URL(response.body.result.url).searchParams.get('scope')?.split(',')).toEqual(['pages_show_list','pages_read_engagement','pages_manage_posts','business_management','pages_messaging','pages_manage_metadata']);
  const state=new URL(response.body.result.url).searchParams.get('state');expect(state).toHaveLength(64);expect(state).not.toBe('workspace');
  expect(response.headers['set-cookie'][0]).toContain('HttpOnly');expect(redisConnection.set).toHaveBeenCalledWith(expect.stringMatching(/^oauth:/),expect.any(String),'EX',600);
 });

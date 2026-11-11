@@ -31,7 +31,7 @@ test('webhooks route by page ID, parse nested text and deduplicate',async()=>{
  await inboxService.normalizeAndSave('FACEBOOK',{entry:[{id:'page',messaging:[{sender:{id:'customer'},recipient:{id:'page'},message:{mid:'mid'}}]}]});expect(db.unifiedMessage.create).not.toHaveBeenCalled();
 });
 test('manual reply targets sender not incoming message ID and persists result',async()=>{
- await inboxService.sendReply('w','m','Hello','request');expect(metaRequest).toHaveBeenCalledWith(expect.anything(),'page/messages',expect.objectContaining({recipient:{id:'customer'}}));expect(db.unifiedMessage.update).toHaveBeenCalledWith({where:{id:'out'},data:{status:'sent'}});
+ await inboxService.sendReply('w','m','Hello','request');expect(metaRequest).toHaveBeenCalledWith(expect.anything(),'page/messages',expect.objectContaining({recipient:{id:'customer'}}));expect(db.unifiedMessage.update).toHaveBeenCalledWith({where:{id:'out'},data:{status:'sent',platformMessageId:'sent'}});
 });
 test('uncertain previous reply cannot be sent twice',async()=>{
  db.unifiedMessage.findUnique.mockResolvedValue({status:'uncertain'});await expect(inboxService.sendReply('w','m','Hello','request')).rejects.toThrow('uncertain');expect(metaRequest).not.toHaveBeenCalled();

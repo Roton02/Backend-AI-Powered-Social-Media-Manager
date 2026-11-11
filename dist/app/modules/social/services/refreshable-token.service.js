@@ -42,17 +42,18 @@ const reconnect = (label, code) => Object.assign(new ApiErrors_1.default(409, `R
  * Returns a usable access token, refreshing it when needed. Refresh tokens are single-use on these
  * platforms, so a Redis lock makes sure parallel jobs for one account never refresh twice.
  */
-function freshAccessToken(account, label, refresh) {
-    return __awaiter(this, void 0, void 0, function* () {
+function freshAccessToken(account_1, label_1, refresh_1) {
+    return __awaiter(this, arguments, void 0, function* (account, label, refresh, force = false) {
         var _a;
-        if (valid(account))
+        // force: renew even if the access token is still valid (keep-alive for accounts that rarely post).
+        if (!force && valid(account))
             return account.token;
         const lock = `token-refresh:${account.id}`;
         for (let attempt = 0; attempt < 40; attempt++) {
             if (yield queue_service_1.redisConnection.set(lock, '1', 'EX', 30, 'NX')) {
                 try {
                     const current = yield prisma_1.default.socialAccount.findUnique({ where: { id: account.id } });
-                    if (valid(current))
+                    if (!force && valid(current))
                         return (0, meta_service_1.decryptToken)(current.accessToken);
                     if (!(current === null || current === void 0 ? void 0 : current.refreshToken))
                         throw reconnect(label, 'no_refresh_token');

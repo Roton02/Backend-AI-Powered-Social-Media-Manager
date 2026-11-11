@@ -66,8 +66,10 @@ export function chunkPlan(size: number) {
 }
 
 /** Uploads the video as a Direct Post and waits for TikTok to confirm it. Returns the post or publish ID. */
+export const refreshTiktok = (refreshToken: string) => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
+
 export async function publishTiktok(account: any, content: string, videoUrl: string) {
-  const token = await freshAccessToken(account, 'TikTok', refreshToken => tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }));
+  const token = await freshAccessToken(account, 'TikTok', refreshTiktok);
   const info = await creatorInfo(account, token);
   const options: string[] = info?.privacy_level_options || [];
   // Unaudited apps can only post privately; PUBLIC is used only when TikTok offers it.
